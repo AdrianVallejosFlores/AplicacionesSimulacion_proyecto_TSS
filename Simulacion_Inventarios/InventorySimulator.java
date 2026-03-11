@@ -12,6 +12,9 @@ public class InventorySimulator {
     private List<Order> pendingOrders = new ArrayList<>();
     private Random random = new Random();
 
+    private double totalAverageInventory = 0;
+    private int totalShortage = 0;
+
     public InventorySimulator(int months, int initialInventory, int Q, int R) {
         this.months = months;
         this.inventory = initialInventory;
@@ -19,11 +22,10 @@ public class InventorySimulator {
         this.R = R;
     }
 
-    public void runSimulation(DefaultTableModel model) {
+    public double[] runSimulation(DefaultTableModel model) {
 
         for (int month = 1; month <= months; month++) {
 
-            // 1️⃣ Procesar pedidos pendientes
             Iterator<Order> iterator = pendingOrders.iterator();
             while (iterator.hasNext()) {
                 Order order = iterator.next();
@@ -37,7 +39,6 @@ public class InventorySimulator {
 
             int initialInventory = inventory;
 
-            // 2️⃣ Generar demanda
             double rDemand = random.nextDouble();
             int demand = DemandDistribution.getDemand(rDemand);
 
@@ -49,7 +50,6 @@ public class InventorySimulator {
                 finalInventory = 0;
             }
 
-            // 3️⃣ Política (Q,R)
             if (finalInventory <= R) {
 
                 double rLead = random.nextDouble();
@@ -59,7 +59,6 @@ public class InventorySimulator {
                 orderCount++;
             }
 
-            // 4️⃣ Inventario promedio mensual
             double averageInventory;
 
             if (shortage == 0) {
@@ -67,6 +66,9 @@ public class InventorySimulator {
             } else {
                 averageInventory = initialInventory / 2.0;
             }
+
+            totalAverageInventory += averageInventory;
+            totalShortage += shortage;
 
             model.addRow(new Object[]{
                     month,
@@ -81,5 +83,25 @@ public class InventorySimulator {
 
             inventory = finalInventory;
         }
+
+        double costOrder = 100;
+        double costHolding = 1.67;
+        double costShortage = 50;
+
+        double orderingCost = orderCount * costOrder;
+        double holdingCost = totalAverageInventory * costHolding;
+        double shortageCost = totalShortage * costShortage;
+
+        double totalCost = orderingCost + holdingCost + shortageCost;
+
+        return new double[]{
+                orderCount,
+                totalAverageInventory,
+                totalShortage,
+                orderingCost,
+                holdingCost,
+                shortageCost,
+                totalCost
+        };
     }
 }
