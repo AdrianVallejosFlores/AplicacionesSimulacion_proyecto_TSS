@@ -10,10 +10,14 @@ public class QueueSimulationGUI extends JFrame {
     private JTextArea metricsArea;
     private JComboBox<Integer> cmbWorkers;
 
+    // ── Nuevos campos: hora de inicio configurable ────────────────────
+    private JSpinner spinnerHour;
+    private JSpinner spinnerMinute;
+
     public QueueSimulationGUI() {
 
         setTitle("Simulación Sistema de Colas — Modelo Coss Bú (Ejemplo 5.6)");
-        setSize(1200, 700);
+        setSize(1200, 720);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLayout(new BorderLayout());
 
@@ -21,20 +25,43 @@ public class QueueSimulationGUI extends JFrame {
         JPanel topPanel = new JPanel(new BorderLayout());
         topPanel.setBorder(BorderFactory.createEmptyBorder(8, 8, 4, 8));
 
-        // ── Fila 1: controles (etiqueta + campo, en línea) ────────────
+        // ── Fila 1: controles ─────────────────────────────────────────
         JPanel controlsPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 16, 4));
 
+        // Tamaño del equipo
         controlsPanel.add(new JLabel("Tamaño del equipo (trabajadores):"));
         cmbWorkers = new JComboBox<>(new Integer[]{1, 3, 4, 5, 6});
         cmbWorkers.setPreferredSize(new Dimension(80, 28));
         controlsPanel.add(cmbWorkers);
 
-        controlsPanel.add(Box.createHorizontalStrut(24));
+        controlsPanel.add(Box.createHorizontalStrut(8));
 
+        // Número de camiones
         controlsPanel.add(new JLabel("Número de camiones a simular:"));
         txtCustomers = new JTextField("12");
         txtCustomers.setPreferredSize(new Dimension(80, 28));
         controlsPanel.add(txtCustomers);
+
+        controlsPanel.add(Box.createHorizontalStrut(8));
+
+        // ── Hora de inicio: spinner de horas y minutos ────────────────
+        // Por defecto: 23:00 (11 PM) — igual que el modelo del PDF.
+        controlsPanel.add(new JLabel("Hora de inicio del turno:"));
+
+        spinnerHour = new JSpinner(new SpinnerNumberModel(23, 0, 23, 1));
+        spinnerHour.setPreferredSize(new Dimension(60, 28));
+        // Mostrar siempre 2 dígitos en el spinner
+        JSpinner.NumberEditor hourEditor = new JSpinner.NumberEditor(spinnerHour, "00");
+        spinnerHour.setEditor(hourEditor);
+        controlsPanel.add(spinnerHour);
+
+        controlsPanel.add(new JLabel(":"));
+
+        spinnerMinute = new JSpinner(new SpinnerNumberModel(0, 0, 59, 5));
+        spinnerMinute.setPreferredSize(new Dimension(60, 28));
+        JSpinner.NumberEditor minuteEditor = new JSpinner.NumberEditor(spinnerMinute, "00");
+        spinnerMinute.setEditor(minuteEditor);
+        controlsPanel.add(spinnerMinute);
 
         topPanel.add(controlsPanel, BorderLayout.CENTER);
 
@@ -71,7 +98,7 @@ public class QueueSimulationGUI extends JFrame {
 
         add(new JScrollPane(table), BorderLayout.CENTER);
 
-        // ── Área de métricas — ahora más alta para mostrar costos ─────
+        // ── Área de métricas ──────────────────────────────────────────
         metricsArea = new JTextArea(10, 20);
         metricsArea.setEditable(false);
         metricsArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
@@ -95,6 +122,10 @@ public class QueueSimulationGUI extends JFrame {
             int customers = Integer.parseInt(txtCustomers.getText().trim());
             int workers   = (int) cmbWorkers.getSelectedItem();
 
+            // ── Leer hora de inicio desde los spinners ────────────────
+            int startHour   = (int) spinnerHour.getValue();
+            int startMinute = (int) spinnerMinute.getValue();
+
             if (customers <= 0) {
                 JOptionPane.showMessageDialog(this,
                         "Ingresa un número de camiones mayor a 0.",
@@ -102,7 +133,10 @@ public class QueueSimulationGUI extends JFrame {
                 return;
             }
 
-            QueueSimulator simulator = new QueueSimulator(customers, workers);
+            // ── Pasar hora de inicio al simulador ─────────────────────
+            QueueSimulator simulator =
+                    new QueueSimulator(customers, workers, startHour, startMinute);
+
             SimulationMetrics metrics = simulator.runSimulation(model);
 
             metricsArea.setText(metrics.toString());
@@ -132,7 +166,7 @@ public class QueueSimulationGUI extends JFrame {
 
                 "Hora Llegada:\n" +
                 "  Hora exacta en que el camión llega al almacén.\n" +
-                "  El turno inicia a las 23:00 (11 PM).\n\n" +
+                "  Calculada desde la hora de inicio configurada.\n\n" +
 
                 "R Servicio:\n" +
                 "  Número aleatorio usado para determinar\n" +

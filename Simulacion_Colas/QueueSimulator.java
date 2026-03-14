@@ -3,26 +3,60 @@ import java.util.*;
 
 public class QueueSimulator {
 
-    // ── Constantes del modelo (Ejemplo 5.6 del PDF) ─────────────────
-    private static final int SHIFT_DURATION_MIN  = 510; // 11 PM → 7:30 AM = 510 min
-    private static final int BREAK_START_MIN     = 240; // 3:00 AM = 11 PM + 240 min
-    private static final int BREAK_DURATION_MIN  =  30; // descanso de 30 min
+    // ── Duración fija del turno: siempre 8.5 horas = 510 minutos ────
+    // Esto no cambia: el turno dura lo mismo sin importar cuándo empieza.
+    private static final int SHIFT_DURATION_MIN = 510;
+
+    // ── Criterios calculados dinámicamente según hora de inicio ──────
+    // Se calculan en el constructor una vez que se conoce startHour/startMinute.
+    private final int breakStartMin; // minutos desde inicio → hora del descanso (3 AM)
+    private final int shiftEndMin;   // minutos desde inicio → fin del turno (7:30 AM)
 
     private int totalCustomers;
     private int workers;
+    private int startHour;
+    private int startMinute;
     private Random random = new Random();
     private int scenario;
 
-    public QueueSimulator(int totalCustomers, int workers) {
+    /**
+     * Constructor principal.
+     *
+     * @param totalCustomers  cantidad de camiones a simular
+     * @param workers         tamaño del equipo (3, 4, 5 o 6)
+     * @param startHour       hora de inicio del turno (0–23)
+     * @param startMinute     minuto de inicio del turno (0–59)
+     */
+    public QueueSimulator(int totalCustomers, int workers, int startHour, int startMinute) {
 
         this.totalCustomers = totalCustomers;
         this.workers        = workers;
+        this.startHour      = startHour;
+        this.startMinute    = startMinute;
         this.scenario       = (workers == 1) ? 1 : 2;
+
+        // ── Calcular en qué minuto relativo ocurre el descanso ────────
+        // El descanso es a las 3:00 AM = 180 minutos desde medianoche.
+        // Si el turno empieza a las 23:00 (1380 min), el descanso ocurre
+        // a los 1380+240=1620 min desde medianoche, es decir, a los 240
+        // minutos relativos desde el inicio.
+        // Fórmula: (3:00 AM en minutos absolutos) - (inicio en minutos absolutos)
+        int breakAbsoluteMin = 3 * 60; // 3:00 AM = 180 min desde medianoche
+        int startAbsoluteMin = startHour * 60 + startMinute;
+
+        // Si el inicio es después de las 3 AM, el descanso es al día siguiente.
+        int rawBreak = breakAbsoluteMin - startAbsoluteMin;
+        this.breakStartMin = (rawBreak <= 0) ? rawBreak + 24 * 60 : rawBreak;
+
+        // ── Calcular en qué minuto relativo termina el turno ──────────
+        // Siempre son 510 minutos (8.5 horas) desde el inicio.
+        this.shiftEndMin = SHIFT_DURATION_MIN;
     }
 
     public SimulationMetrics runSimulation(DefaultTableModel model) {
 
-        TimeUtils.initializeStartTime();
+        // Configurar TimeUtils con la hora de inicio elegida por el usuario
+        TimeUtils.initializeStartTime(startHour, startMinute);
 
         List<Customer> customers = new ArrayList<>();
 
@@ -31,6 +65,7 @@ public class QueueSimulator {
 
         int lastArrival    = 0;
         int lastServiceEnd = 0;
+        boolean breakTaken = false; // control para que el descanso ocurra una sola vez
 
         double totalWaiting     = 0;
         double totalSystem      = 0;
@@ -41,74 +76,22 @@ public class QueueSimulator {
 
             Customer c = new Customer(i);
 
-            // Camiones iniciales: ya están ahí a las 11 PM (tiempo 0)
-            c.rArrival    = 0;
+            c.rArrival     = 0;
             c.interArrival = 0;
             c.arrivalTime  = 0;
 
-            c.rService   = random.nextDouble();
-            c.serviceTime = ServiceDistribution.getServiceTime(c.rService, workers);
-
-            c.serviceStart = lastServiceEnd;
-            c.serviceEnd   = c.serviceStart + c.serviceTime;
-            c.waitingTime  = c.serviceStart - c.arrivalTime;
-            c.systemTime   = c.serviceEnd   - c.arrivalTime;
-
-            lastServiceEnd = c.serviceEnd;
-
-            totalWaiting     += c.waitingTime;
-            totalSystem      += c.systemTime;
-            totalServiceTime += c.serviceTime;
-
-            customers.add(c);
-
-            model.addRow(buildRow(c));
-        }
-
-        // ── Procesar camiones que llegan durante el turno ─────────────
-        int customerIndex = initialTrucks + 1;
-
-        for (int i = 1; i <= totalCustomers; i++) {
-
-            Customer c = new Customer(customerIndex++);
-
-            // ── Tiempo entre llegadas ──────────────────────────────────
-            c.rArrival     = random.nextDouble();
-            c.interArrival = ArrivalDistribution.getInterArrivalTime(c.rArrival, scenario);
-
-            if (i == 1) {
-                c.arrivalTime = c.interArrival;
-            } else {
-                c.arrivalTime = lastArrival + c.interArrival;
-            }
-
-            // Si el camión llega después del fin del turno, lo ignoramos
-            if (c.arrivalTime > SHIFT_DURATION_MIN) break;
-
-            lastArrival = c.arrivalTime;
-
-            // ── Tiempo de servicio ────────────────────────────────────
             c.rService    = random.nextDouble();
             c.serviceTime = ServiceDistribution.getServiceTime(c.rService, workers);
 
-            // ── Inicio de servicio: espera al servidor o al camión ────
-            c.serviceStart = Math.max(c.arrivalTime, lastServiceEnd);
+            c.serviceStart = lastServiceEnd;
 
-            // ── Ajuste por descanso del personal ─────────────────────
-            // Si el servicio anterior terminó después de las 3 AM,
-            // el descanso se toma al finalizar ese servicio.
-            if (c.serviceStart >= BREAK_START_MIN &&
-                lastServiceEnd  >= BREAK_START_MIN &&
-                c.serviceStart  == lastServiceEnd) {
-
-                // Solo se aplica descanso si no se ha tomado aún
-                // (simplificación: se asume una vez por turno)
+            // ── Verificar descanso antes de iniciar servicio ──────────
+            if (!breakTaken && c.serviceStart >= breakStartMin) {
+                c.serviceStart += 30; // 30 min de descanso
+                breakTaken = true;
             }
 
-            // ── Fin de servicio ───────────────────────────────────────
             c.serviceEnd  = c.serviceStart + c.serviceTime;
-
-            // ── Tiempos de espera y sistema ───────────────────────────
             c.waitingTime = c.serviceStart - c.arrivalTime;
             c.systemTime  = c.serviceEnd   - c.arrivalTime;
 
@@ -119,7 +102,54 @@ public class QueueSimulator {
             totalServiceTime += c.serviceTime;
 
             customers.add(c);
+            model.addRow(buildRow(c));
+        }
 
+        // ── Procesar camiones que llegan durante el turno ─────────────
+        int customerIndex = initialTrucks + 1;
+
+        for (int i = 1; i <= totalCustomers; i++) {
+
+            Customer c = new Customer(customerIndex++);
+
+            c.rArrival     = random.nextDouble();
+            c.interArrival = ArrivalDistribution.getInterArrivalTime(c.rArrival, scenario);
+
+            if (i == 1) {
+                c.arrivalTime = c.interArrival;
+            } else {
+                c.arrivalTime = lastArrival + c.interArrival;
+            }
+
+            // Camión que llega después del fin del turno: se ignora
+            if (c.arrivalTime > shiftEndMin) break;
+
+            lastArrival = c.arrivalTime;
+
+            c.rService    = random.nextDouble();
+            c.serviceTime = ServiceDistribution.getServiceTime(c.rService, workers);
+
+            c.serviceStart = Math.max(c.arrivalTime, lastServiceEnd);
+
+            // ── Verificar descanso antes de iniciar servicio ──────────
+            // El descanso ocurre una sola vez, tan pronto como el servidor
+            // queda libre después de las 3 AM (breakStartMin).
+            if (!breakTaken && c.serviceStart >= breakStartMin) {
+                c.serviceStart += 30;
+                breakTaken = true;
+            }
+
+            c.serviceEnd  = c.serviceStart + c.serviceTime;
+            c.waitingTime = c.serviceStart - c.arrivalTime;
+            c.systemTime  = c.serviceEnd   - c.arrivalTime;
+
+            lastServiceEnd = c.serviceEnd;
+
+            totalWaiting     += c.waitingTime;
+            totalSystem      += c.systemTime;
+            totalServiceTime += c.serviceTime;
+
+            customers.add(c);
             model.addRow(buildRow(c));
         }
 
@@ -130,17 +160,17 @@ public class QueueSimulator {
         int totalProcessed = customers.size();
 
         // ── Métricas de cola ──────────────────────────────────────────
-        double avgWaiting      = totalWaiting / totalProcessed;
-        double avgSystem       = totalSystem  / totalProcessed;
-        int    lastEnd         = customers.get(totalProcessed - 1).serviceEnd;
-        double totalTime       = Math.max(lastEnd, SHIFT_DURATION_MIN);
-        double utilization     = totalServiceTime / totalTime;
-        double avgQueueLength  = totalWaiting     / totalTime;
+        double avgWaiting     = totalWaiting / totalProcessed;
+        double avgSystem      = totalSystem  / totalProcessed;
+        int    lastEnd        = customers.get(totalProcessed - 1).serviceEnd;
+        double totalTime      = Math.max(lastEnd, shiftEndMin);
+        double utilization    = totalServiceTime / totalTime;
+        double avgQueueLength = totalWaiting     / totalTime;
 
-        // ── Cálculo de tiempo extra ───────────────────────────────────
-        int extraMinutes = Math.max(0, lastEnd - SHIFT_DURATION_MIN);
+        // ── Tiempo extra: minutos más allá del fin del turno ─────────
+        int extraMinutes = Math.max(0, lastEnd - shiftEndMin);
 
-        // ── Retornar métricas con costos ──────────────────────────────
+        // ── Retornar métricas con costos (solo escenario del PDF) ─────
         if (scenario == 2) {
             return new SimulationMetrics(
                     avgWaiting,
@@ -162,21 +192,20 @@ public class QueueSimulator {
         }
     }
 
-    // ── Genera los camiones esperando al inicio (Tabla 5.13) ──────────
+    // ── Camiones esperando al abrir el almacén (Tabla 5.13) ──────────
     private int getInitialTrucks() {
 
-        if (scenario == 1) return 0; // escenario simple no usa esto
+        if (scenario == 1) return 0;
 
         double r = random.nextDouble();
 
-        // Tabla 5.13 — Transformada inversa
         if      (r < 0.50) return 0;
         else if (r < 0.75) return 1;
         else if (r < 0.90) return 2;
         else               return 3;
     }
 
-    // ── Construye la fila para la tabla de la GUI ────────────────────
+    // ── Fila para la tabla de la GUI ─────────────────────────────────
     private Object[] buildRow(Customer c) {
 
         return new Object[]{
