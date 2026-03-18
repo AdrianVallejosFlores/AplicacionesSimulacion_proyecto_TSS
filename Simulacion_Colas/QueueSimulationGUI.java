@@ -93,6 +93,9 @@ public class QueueSimulationGUI extends JFrame {
         model.addColumn("Espera (min)");
         model.addColumn("Tiempo Sistema (min)");
 
+        model.addColumn("Ocio Personal (min)");
+        model.addColumn("Longitud Cola");
+
         table = new JTable(model);
         table.setAutoResizeMode(JTable.AUTO_RESIZE_ALL_COLUMNS);
 
@@ -187,7 +190,17 @@ public class QueueSimulationGUI extends JFrame {
 
                 "Tiempo Sistema:\n" +
                 "  Tiempo total del camión en el sistema\n" +
-                "  (espera + descarga).";
+                "  (espera + descarga)."+
+
+                "Ocio Personal:\n" +
+                "  Minutos que el equipo esperó sin camión que descargar\n" +
+                "  antes de que llegara este camión. Si el servidor\n" +
+                "  terminó antes de la llegada, ese tiempo es el ocio.\n\n" +
+
+                "Longitud Cola:\n" +
+                "  Número de camiones que estaban esperando en cola\n" +
+                "  al momento en que este camión llegó al almacén.\n" +
+                "  No incluye al camión que estaba siendo servido.";
 
         JTextArea textArea = new JTextArea(message);
         textArea.setEditable(false);
